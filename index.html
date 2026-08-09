@@ -1012,9 +1012,6 @@ function callApi(action, payload, _retry) {
     .then(function (res) { return res.json(); })
     .then(function (json) {
       if (!json.success) {
-        if (!_retry && json.error && json.error.indexOf('ກະລຸນາລະບຸ action') > -1) {
-          return callApi(action, payload, true);
-        }
         showToast('❌ ' + (json.error || 'ເກີດຂໍ້ຜິດພາດ'));
         return Promise.reject(new Error(json.error || 'API error'));
       }
@@ -1264,8 +1261,11 @@ function renderAll() {
   // ເພື່ອບໍ່ໃຫ້ chart ຖືກທຳລາຍ+ວາດໃໝ່ (ຄືກັບ "ຣີເຟຣຊ") ທຸກຄັ້ງທີ່ sync ພື້ນຫຼັງ
   const reportsPageEl = document.getElementById('page-reports');
   if (reportsPageEl && reportsPageEl.classList.contains('active')) {
-    _lastReportsSnapshot = JSON.stringify(STATE);
-    renderReportsPage();
+    const snap = JSON.stringify(STATE);
+    if (snap !== _lastReportsSnapshot) {      // 🩹 render ໃໝ່ສະເພາະຕອນຂໍ້ມູນປ່ຽນແທ້ໆ
+      _lastReportsSnapshot = snap;
+      renderReportsPage();
+    }
   }
   populateCategoryGrid();
   populateWalletSelects();
@@ -1929,7 +1929,18 @@ function saveManualTx() {
     _isSavingManualTx = false; // 🩹 ປົດລັອກຫຼັງບັນທຶກສຳເລັດ
     showToast('✅ ບັນທຶກລາຍການແລ້ວ');
 
-    call.then(function () { syncInBackground(); }).catch(function () { syncInBackground(); });
+    call.then(function (savedObj) {
+      // 🩹 ແທນ id ຊົ່ວຄາວດ້ວຍ id ແທ້ຈາກ Server ທັນທີ ບໍ່ຕ້ອງລໍ sync ຄືນທັງໝົດ
+      // ເຮັດໃຫ້ syncInBackground() ເຫັນວ່າຂໍ້ມູນຄືເກົ່າ ບໍ່ຕ້ອງ render ຄືນທັງໜ້າ = ບໍ່ມີອາການ "ໂຫລດຂາດ" ອີກ
+      if (savedObj && savedObj.id) {
+        const idx = STATE.transactions.findIndex(t => t.id === optimisticTx.id);
+        if (idx > -1) {
+          STATE.transactions[idx].id = savedObj.id;
+          localStorage.setItem('cachedState', JSON.stringify(STATE));
+        }
+      }
+      syncInBackground();
+    }).catch(function () { syncInBackground(); });
   };
 
   if (pendingSlipBase64) {
@@ -2059,8 +2070,18 @@ function saveScannedItems() {
   showToast('✅ ບັນທຶກລາຍການແລ້ວ');
 
   callApi('addTransactionsBulk', { list: txs })
-    .then(function () { syncInBackground(); })
-    .catch(function () { syncInBackground(); });
+  .then(function (savedList) {
+    // 🩹 ຈັບຄູ່ id ຊົ່ວຄາວທີ່ໃສ່ໄວ້ ໃຫ້ກາຍເປັນ id ແທ້ຈາກ Server (ຮຽງລຳດັບດຽວກັນ)
+    if (Array.isArray(savedList)) {
+      const tmpItems = STATE.transactions.filter(t => String(t.id).indexOf('tmp') === 0);
+      tmpItems.slice(-savedList.length).forEach(function (t, i) {
+        if (savedList[i] && savedList[i].id) t.id = savedList[i].id;
+      });
+      localStorage.setItem('cachedState', JSON.stringify(STATE));
+    }
+    syncInBackground();
+  })
+  .catch(function () { syncInBackground(); });
 }
 
 let attachReceiptBase64 = null, attachReceiptMime = null;
@@ -2383,11 +2404,17 @@ function drawCategoryChart(){
   const colors = PASTEL_CHART;
   const labels = Object.keys(catTotals);
   const ctx = document.getElementById('report-chart');
-  if (_reportChartInstance){ _reportChartInstance.destroy(); _reportChartInstance=null; }
   if (ctx && labels.length){
-    _reportChartInstance = new Chart(ctx,{ type:'doughnut',
+    if (_reportChartInstance) {
+      _reportChartInstance.data.labels = labels;
+      _reportChartInstance.data.datasets[0].data = Object.values(catTotals);
+      _reportChartInstance.data.datasets[0].backgroundColor = labels.map((_,i)=>colors[i%colors.length]);
+      _reportChartInstance.update();
+    } else {
+      _reportChartInstance = new Chart(ctx,{ type:'doughnut',
       data:{ labels, datasets:[{ data:Object.values(catTotals), backgroundColor:labels.map((_,i)=>colors[i%colors.length]), borderWidth:3, borderColor:'#fff', hoverOffset:8 }] },
       options:{ cutout:'70%', plugins:{ legend:{ display:false } } } });
+    }
   }
   const d = new Date(reportState.month+'-01');
   document.getElementById('report-donut-center').innerHTML = total
