@@ -78,6 +78,7 @@ body{
   background-color:color-mix(in srgb, var(--bg) 55%, #FAF8FF);
   min-height:100vh;
   overflow-x:hidden;
+  overscroll-behavior-y:contain;
   font-size:15px;
   line-height:1.55;
   letter-spacing:.1px;
@@ -121,16 +122,20 @@ body{
 }
 
 .card{
-  background:var(--glass);
-  -webkit-backdrop-filter:blur(18px) saturate(165%);
-  backdrop-filter:blur(18px) saturate(165%);
+  background:linear-gradient(155deg,rgba(255,255,255,.95),rgba(255,255,255,.88));
   border:1px solid var(--stroke);
   border-radius:var(--radius);
   padding:18px;
   box-shadow:var(--sh-2);
   margin-bottom:14px;
   position:relative;
+  contain:layout style paint;
 }
+.lazy-card{
+  content-visibility:auto;
+  contain-intrinsic-size:1px 620px;
+}
+
 @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
 
 input, select, textarea{
@@ -369,7 +374,8 @@ button:active{transform:scale(.965);}
 .fab-nav{
   position:fixed;bottom:14px;left:12px;right:12px;max-width:456px;margin:0 auto;
   background:rgba(255,255,255,.78);
-  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  -webkit-backdrop-filter:blur(12px) saturate(150%);backdrop-filter:blur(12px) saturate(150%);
+  transform:translateZ(0);
   border:1px solid rgba(255,255,255,.9);
   box-shadow:0 14px 40px rgba(84,71,140,.20);
   display:flex;align-items:center;justify-content:space-around;
@@ -517,7 +523,7 @@ button:active{transform:scale(.965);}
   animation:spin 1s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 #toast{position:fixed;bottom:110px;left:50%;transform:translateX(-50%) translateY(10px);
-  background:rgba(48,42,70,.94);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  background:rgba(48,42,70,.94);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
   color:#fff;padding:13px 20px;border-radius:18px;font-size:13px;z-index:9999;display:none;
   max-width:82%;text-align:center;box-shadow:var(--sh-3);font-weight:600;}
 #toast.show{display:block;animation:toastIn .32s cubic-bezier(.22,1,.36,1) both;}
@@ -2807,7 +2813,7 @@ function drawGoalsReport(){
     const pct = Math.min(100, rawPct); // ໃຊ້ຄ່າຈິງ ບໍ່ຕັດເສດ
     const pctDisplay = pct < 1 && pct > 0 ? pct.toFixed(2) : Math.round(pct); // ຖ້າໜ້ອຍກວ່າ 1% ໃຫ້ໂຊທົດສະນິຍົມ
     const remain = Math.max(0, Number(g.targetAmount) - Number(g.currentAmount));
-    return `<div class="card">
+    return `<div class="card lazy-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <b>${g.icon || '🚩'} ${g.name}</b><span style="font-weight:800;color:var(--primary-dark);">${pctDisplay}%</span>
       </div>
@@ -2837,13 +2843,13 @@ function drawGoalsReport(){
         <button class="${(goalChartMode[g.id]||'daily')==='daily'?'active':''}" onclick="setGoalChartView('${g.id}','daily','goal-chart-${g.id}')">ລາຍວັນ</button>
         <button class="${(goalChartMode[g.id]||'daily')==='monthly'?'active':''}" onclick="setGoalChartView('${g.id}','monthly','goal-chart-${g.id}')">ລາຍເດືອນ</button>
       </div>
-      <canvas id="goal-chart-${g.id}" height="180"></canvas>
+      <canvas id="goal-chart-${g.id}" data-goal-id="${g.id}" height="180"></canvas>
 
       <div class="section-title" style="margin:16px 0 6px;">📋 ລາຍການຕ່າງໆ</div>
       <div>${buildGoalHistoryHtml(g.id)}</div>
     </div>`;
   }).join('');
-  STATE.goals.forEach(g => drawGoalProgressChart(g.id, 'goal-chart-' + g.id, goalChartMode[g.id] || 'daily'));
+  setupLazyGoalCharts_();
 }
 
 // ---------------- GOAL DETAIL ----------------
@@ -2878,6 +2884,33 @@ function buildGoalHistoryHtml(goalId) {
 
 let _goalChartInstances = {};
 let goalChartMode = {};
+let _goalChartObserver = null;
+
+// 🐢 ໂຫຼດກຣາບເປົ້າໝາຍແບບ "ຄ່ອຍໂຫຼດ" — ສ້າງກຣາບສະເພາະອັນທີ່ເລື່ອນເຫັນແທ້ໆເທົ່ານັ້ນ
+// ຊ່ວຍໃຫ້ໜ້າ "ເປົ້າໝາຍ" ບໍ່ກະຕຸກ ເມື່ອຜູ້ໃຊ້ມີຫຼາຍເປົ້າໝາຍ (ບໍ່ຕ້ອງສ້າງ Chart.js
+// ພ້ອມກັນທຸກອັນຄືເກົ່າ, ອັນທີ່ຍັງບໍ່ຖືກເລື່ອນມາໃກ້ຈະຍັງບໍ່ຖືກສ້າງ)
+function setupLazyGoalCharts_() {
+  if (_goalChartObserver) { _goalChartObserver.disconnect(); }
+  if (!('IntersectionObserver' in window)) {
+    // browser ເກົ່າທີ່ບໍ່ຮອງຮັບ -> fallback ສ້າງທຸກອັນຄືເກົ່າ
+    STATE.goals.forEach(g => drawGoalProgressChart(g.id, 'goal-chart-' + g.id, goalChartMode[g.id] || 'daily'));
+    return;
+  }
+  _goalChartObserver = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      const canvas = entry.target;
+      const goalId = canvas.dataset.goalId;
+      if (!goalId) return;
+      drawGoalProgressChart(goalId, canvas.id, goalChartMode[goalId] || 'daily');
+      _goalChartObserver.unobserve(canvas);
+    });
+  }, { root: null, rootMargin: '400px 0px', threshold: 0.01 });
+
+  document.querySelectorAll('#goals-report-wrap canvas[data-goal-id]').forEach(function (c) {
+    _goalChartObserver.observe(c);
+  });
+}
 function drawGoalProgressChart(goalId, canvasId, mode) {
   mode = mode || goalChartMode[goalId] || 'daily';
   const canvas = document.getElementById(canvasId);
@@ -2925,6 +2958,7 @@ function drawGoalProgressChart(goalId, canvasId, mode) {
 function setGoalChartView(goalId, mode, canvasId) {
   goalChartMode[goalId] = mode;
   const canvas = document.getElementById(canvasId);
+  if (_goalChartObserver && canvas) _goalChartObserver.unobserve(canvas); // 🐢 ຜູ້ໃຊ້ກົດເອງ = ບໍ່ຕ້ອງລໍ observer ອີກ
   const seg = canvas && (canvas.closest('.card')?.querySelector('.seg') || canvas.parentElement.querySelector('.seg'));
   if (seg) {
     const btns = seg.querySelectorAll('button');
@@ -3075,7 +3109,7 @@ function drawInstallmentsReport(){
         </div>
       </div>`).join('') : '<div class="empty-hint">ຍັງບໍ່ມີການຈ່າຍ, ເພີ່ມງວດທຳອິດເບິ່ງ 👆</div>';
 
-    return `<div class="card">
+    return `<div class="card lazy-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <b>${l.name}</b>
         <span class="badge">${l.loanType === 'declining' ? 'ລົດຕົ້ນລົດດອກ' : 'ຄິດດອກຄົງທີ່'}</span>
