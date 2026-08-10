@@ -476,6 +476,19 @@ button:active{transform:scale(.965);}
 .report-donut-center{position:absolute;text-align:center;pointer-events:none;}
 .report-donut-center .amt{font-weight:800;font-size:25px;letter-spacing:-.6px;}
 .report-donut-center .lbl{font-size:15px;color:var(--text-light);}
+/* 🩹 ໜ້າຕາຕອນບໍ່ມີຂໍ້ມູນ (empty state) ຂອງກຣາບໂດນັດ */
+.donut-empty-state{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:46px 10px;color:var(--text-light);width:100%;
+}
+.donut-empty-state .demoji{font-size:54px;opacity:.32;filter:grayscale(1);}
+.donut-empty-state .dtext{font-size:13px;font-weight:700;}
+
+/* 🩹 ອະນິເມຊັນ fade-in ນຸ້ມນວນ ທຸກຄັ້ງທີ່ກຣາບຖືກສ້າງໃໝ່ (ກັນອາການກະພິບ) */
+@keyframes chartFadeIn{from{opacity:0;transform:scale(.94);}to{opacity:1;transform:scale(1);}}
+#report-chart,#networth-chart,#time-chart,#daily-chart,[id^="goal-chart-"],#goal-detail-chart{
+  animation:chartFadeIn .45s cubic-bezier(.22,1,.36,1) both;
+}
 .report-table-row{display:flex;align-items:center;justify-content:space-between;padding:11px 0;
   border-bottom:1px solid var(--line);font-size:15px;gap:8px;}
 .report-table-row:last-child{border-bottom:none;}
@@ -2320,7 +2333,8 @@ function renderReportsSection(){
 
   if (reportState.tab === 'category'){
     html += `<div class="card"><div class="report-donut-wrap"><canvas id="report-chart" height="240"></canvas>
-      <div class="report-donut-center" id="report-donut-center"></div></div>
+      <div class="report-donut-center" id="report-donut-center"></div>
+      <div class="donut-empty-state hidden" id="report-donut-empty"><div class="demoji">🍩</div><div class="dtext">ຍັງບໍ່ມີຂໍ້ມູນເດືອນນີ້</div></div></div>
       <div class="cat-legend" id="cat-legend"></div></div>
       <div class="card"><div style="font-weight:800;margin-bottom:6px;">ແຍກຕາມໝວດໝູ່</div><div id="cat-table"></div></div>`;
   } else if (reportState.tab === 'tag'){
@@ -2387,7 +2401,8 @@ function renderReportsSection(){
     </div>`;
     html += renderFinancialHealthSection(reportState.networthCurrency);
     html += `<div class="card"><div class="report-donut-wrap"><canvas id="networth-chart" height="240"></canvas>
-      <div class="report-donut-center" id="networth-center"></div></div></div>
+      <div class="report-donut-center" id="networth-center"></div>
+      <div class="donut-empty-state hidden" id="networth-donut-empty"><div class="demoji">🍩</div><div class="dtext">ບໍ່ມີກະເປົາເງິນສະກຸນນີ້</div></div></div></div>
       <div class="card" id="networth-table"></div>`;
   } else if (reportState.tab === 'goals'){
     html += `<div id="goals-report-wrap"></div>`;
@@ -2415,23 +2430,38 @@ function drawCategoryChart(){
   const total = Object.values(catTotals).reduce((a,b)=>a+b,0);
   const colors = PASTEL_CHART;
   const labels = Object.keys(catTotals);
+  const hasData = labels.length > 0 && total > 0; // 🩹 ໃຊ້ຄ່ານີ້ຕັດສິນ empty state
+
   const ctx = document.getElementById('report-chart');
-  if (ctx && labels.length){
-    if (_reportChartInstance) {
-      _reportChartInstance.data.labels = labels;
-      _reportChartInstance.data.datasets[0].data = Object.values(catTotals);
-      _reportChartInstance.data.datasets[0].backgroundColor = labels.map((_,i)=>colors[i%colors.length]);
-      _reportChartInstance.update();
-    } else {
+  const emptyEl = document.getElementById('report-donut-empty');
+  const centerEl = document.getElementById('report-donut-center');
+
+  // 🩹 ທຳລາຍ Chart ເກົ່າກ່ອນສ້າງໃໝ່ທຸກຄັ້ງ (ຄືກັນກັບກຣາບອື່ນໆໃນໜ້ານີ້)
+  // ເພື່ອບໍ່ໃຫ້ chart instance ເກົ່າຄ້າງອ້າງອີງໃສ່ canvas ໂຕທີ່ຖືກລຶບອອກໄປແລ້ວ
+  if (_reportChartInstance) { _reportChartInstance.destroy(); _reportChartInstance = null; }
+
+  if (hasData) {
+    if (ctx) ctx.classList.remove('hidden');
+    if (centerEl) centerEl.classList.remove('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+    if (ctx) {
       _reportChartInstance = new Chart(ctx,{ type:'doughnut',
-      data:{ labels, datasets:[{ data:Object.values(catTotals), backgroundColor:labels.map((_,i)=>colors[i%colors.length]), borderWidth:3, borderColor:'#fff', hoverOffset:8 }] },
-      options:{ cutout:'70%', plugins:{ legend:{ display:false } } } });
+        data:{ labels, datasets:[{ data:Object.values(catTotals), backgroundColor:labels.map((_,i)=>colors[i%colors.length]), borderWidth:3, borderColor:'#fff', hoverOffset:8 }] },
+        options:{ cutout:'70%', plugins:{ legend:{ display:false } } } });
     }
+  } else {
+    // 🩹 ບໍ່ມີຂໍ້ມູນ -> ເຊື່ອງ canvas/ຕົວເລກກາງ, ໂຊ empty state ໜ້າຮັກແທນ
+    if (ctx) ctx.classList.add('hidden');
+    if (centerEl) centerEl.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.remove('hidden');
   }
+
   const d = new Date(reportState.month+'-01');
-  document.getElementById('report-donut-center').innerHTML = total
-    ? `<div class="amt">${fmt(total)}</div><div class="lbl">${reportState.period==='month'?LAO_MONTHS_FULL[d.getMonth()]:'ທັງໝົດ'}</div>`
-    : `<div class="lbl">ບໍ່ມີຂໍ້ມູນ</div>`;
+  if (centerEl) {
+    centerEl.innerHTML = total
+      ? `<div class="amt">${fmt(total)}</div><div class="lbl">${reportState.period==='month'?LAO_MONTHS_FULL[d.getMonth()]:'ທັງໝົດ'}</div>`
+      : `<div class="lbl">ບໍ່ມີຂໍ້ມູນ</div>`;
+  }
   document.getElementById('cat-legend').innerHTML = labels.map((k,i)=>
     `<div class="cat-legend-item"><span class="dot" style="background:${colors[i%colors.length]};"></span>${catIcons[k]} ${k} ${total?Math.round(catTotals[k]/total*100):0}%</div>`
   ).join('') || '<div class="empty-hint">ບໍ່ມີຂໍ້ມູນ</div>';
@@ -2750,15 +2780,15 @@ function drawWeekdayHeatmap_(catFilter) {
 function drawNetWorthChart(){
   const centerEl = document.getElementById('networth-center');
   const tableEl = document.getElementById('networth-table');
+  const emptyEl = document.getElementById('networth-donut-empty');
+  const ctx = document.getElementById('networth-chart');
   if (!centerEl || !tableEl) return;
 
-  // 🩹 ດຽວນີ້ອີງໃສ່ສະກຸນເງິນທີ່ຜູ້ໃຊ້ເລືອກ (reportState.networthCurrency)
-  // ແທນທີ່ຈະລັອກໄວ້ສະເພາະ LAK ຄືເກົ່າ, ໃຫ້ສະຫຼັບເບິ່ງ ກີບ/ບາດ/ໂດລາ ໄດ້ແຍກກັນ
   const selCurrency = reportState.networthCurrency || 'LAK';
   const selWallets = STATE.wallets.filter(w => (w.currency || 'LAK') === selCurrency);
   const total = selWallets.reduce((s,w)=>s+Number(w.balance||0),0);
+  const hasData = selWallets.length > 0 && total > 0; // 🩹 ໃຊ້ຄ່ານີ້ຕັດສິນ empty state
 
-  // ຍອດສະກຸນອື່ນທີ່ບໍ່ໄດ້ຖືກເລືອກ ສະແດງແຍກຕ່າງຫາກ
   const otherTotals = {};
   STATE.wallets.forEach(w => {
     const c = w.currency || 'LAK';
@@ -2770,13 +2800,23 @@ function drawNetWorthChart(){
     .join(' · ');
 
   const colors = PASTEL_CHART;
-  const ctx = document.getElementById('networth-chart');
   if (_networthChartInstance){ _networthChartInstance.destroy(); _networthChartInstance=null; }
-  if (ctx && selWallets.length){
-    _networthChartInstance = new Chart(ctx,{ type:'doughnut',
-      data:{ labels: selWallets.map(w=>w.name), datasets:[{ data: selWallets.map(w=>Number(w.balance||0)), backgroundColor: selWallets.map((_,i)=>colors[i%colors.length]), borderWidth:3, borderColor:'#fff', hoverOffset:8 }] },
-      options:{ cutout:'70%', plugins:{ legend:{ display:false } } } });
+
+  if (hasData) {
+    if (ctx) ctx.classList.remove('hidden');
+    centerEl.classList.remove('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+    if (ctx) {
+      _networthChartInstance = new Chart(ctx,{ type:'doughnut',
+        data:{ labels: selWallets.map(w=>w.name), datasets:[{ data: selWallets.map(w=>Number(w.balance||0)), backgroundColor: selWallets.map((_,i)=>colors[i%colors.length]), borderWidth:3, borderColor:'#fff', hoverOffset:8 }] },
+        options:{ cutout:'70%', plugins:{ legend:{ display:false } } } });
+    }
+  } else {
+    if (ctx) ctx.classList.add('hidden');
+    centerEl.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.remove('hidden');
   }
+
   centerEl.innerHTML = `<div class="amt">${fmt(total)}</div><div class="lbl">ຊັບສິນສຸດທິ (${CURRENCY_SYMBOLS[selCurrency] || selCurrency})</div>`;
 
   tableEl.innerHTML =
